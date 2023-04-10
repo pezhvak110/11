@@ -1,0 +1,141 @@
+import requests
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import hmac
+import hashlib
+from sklearn.linear_model import LinearRegression
+
+# Get currency from user
+currency = input("Enter the currency: ")
+
+# Set API endpoint and parameters
+endpoint = 'https://api.coinex.com/v1/market/kline'
+access_id = 'E8500870FEF640E1857FAAAD69096A53 '
+secret_key = '6115D978008D6473F7089701AB7C65641000AD554D545F67'
+params = {
+    'market': currency,
+    'type': '15min',
+    'size': 1440
+}
+
+# Get data from Coinex API
+response = requests.get(endpoint, params=params)
+data = response.json()['data']
+
+# Create DataFrame with correct number of columns
+df = pd.DataFrame(data, columns=['time', 'open', 'high', 'low', 'close', 'volume', 'amount'])
+df['time'] = pd.to_datetime(df['time'], unit='s')
+df.set_index('time', inplace=True)
+
+# Set strategy parameters
+window = 20
+deviation = 2
+sufficient_funds = 10
+
+# Calculate Bollinger Bands
+rolling_mean = df['close'].rolling(window=window).mean()
+rolling_std = df['close'].rolling(window=window).std()
+df['upper_band'] = rolling_mean + (rolling_std * deviation)
+df['lower_band'] = rolling_mean - (rolling_std * deviation)
+
+# Check for bullish engulfing pattern
+df['engulfing'] = np.where((df['close'].shift(1) < df['open'].shift(1)) & (df['open'] < df['close']) & (df['open'] < df['close'].shift(1)) & (df['close'] > df['open'].shift(1)), 1, 0)
+
+# Convert values to float before comparison
+df['signal'] = np.where(df['close'].astype(float) < df['lower_band'].astype(float), 1, 0)
+
+# Buy/sell signal
+df['signal'] = np.where(df['close'].astype(float) < df['lower_band'].astype(float), 1, 0)
+df['signal'] = np.where(df['close'].astype(float) > df['upper_band'].astype(float), -1, df['signal'])
+
+# Check for buy signal
+if df['signal'].iloc[-1] == 1:
+    # Set order parameters
+    params = {
+        'access_id': access_id,
+        'amount': 100,
+        'market': 'DOGEUSDT',
+        'price': df['close'].iloc[-1],
+        'type': 'buy',
+        'tonce': int(time.time() * 1000)
+    }
+    # Generate signature
+    params['signature'] = generate_signature(params, secret_key)
+    # Place order
+    response = requests.post(endpoint, json=params)
+    print(response.json())
+# Calculate returns
+df['returns'] = np.log(df['close'].astype(float) / df['close'].shift(1).astype(float))
+df['strategy_returns'] = df['signal'].shift(1) * df['returns']
+
+# Calculate cumulative returns
+df['cumulative_returns'] = (np.exp(df['strategy_returns'].cumsum()) - 1) * sufficient_funds
+
+# Plot results
+plt.figure(figsize=(10, 3))
+plt.plot(df['cumulative_returns'])
+plt.title('Bollinger Bands Trading Strategy')
+plt.xlabel('Date')
+plt.ylabel('Cumulative Returns')
+plt.show()
+
+# Get buy signals
+buy_signals = df[df['signal'] == 1]
+
+# Get sell signals
+sell_signals = df[df['signal'] == -1]
+
+# Define the features and target variable
+X = df[['feature1', 'feature2', 'feature3']]
+y = df['price']
+
+# Split the data into training and test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
+
+# Create and fit the model
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+# Make predictions for the test set
+y_pred = model.predict(X_test)
+
+# Evaluate the model
+r2_score = model.score(X_test, y_test)
+
+# Generate buy and sell signals
+df['signal'] = 0
+df.loc[y_pred < lower_band, 'signal'] = 1
+df.loc[y_pred > upper_band, 'signal'] = -1
+
+# Print buy signals
+print('Buy signals:')
+print(buy_signals)
+
+# Print sell signals
+print('Sell signals:')
+print(sell_signals)
+
+# Print number of buy signals
+print('Number of buy signals:', len(buy_signals))
+
+# Print number of sell signals
+print('Number of sell signals:', len(sell_signals))
+# Set start and end times for trading
+start_time = datetime.now()
+end_time = start_time + timedelta(minutes=15)
+
+# Check if current time is within trading time frame
+if start_time <= datetime.now() <= end_time:
+    # Generate buy/sell signal
+    df['signal'] = np.where(df['close'].astype(float) < df['lower_band'].astype(float), 1, 0)
+    df['signal'] = np.where(df['close'].astype(float) > df['upper_band'].astype(float), -1, df['signal'])
+
+# Print buy signals in bold font
+print('\033[1m' + 'Buy signals:' + '\033[0m')
+print(buy_signals)
+
+# Print sell signals in bold font
+print('\033[1m' + 'Sell signals:' + '\033[0m')
+print(sell_signals)
